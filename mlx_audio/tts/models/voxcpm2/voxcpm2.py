@@ -200,7 +200,12 @@ class Model(nn.Module):
         """Load, pad and VAE-encode audio.
 
         Args:
-            audio_input: file path (str), mx.array, or numpy array.
+            audio_input: file path (str), mx.array, or numpy array. Prefer a
+                path: its true rate is read from the file and resampled
+                correctly. A raw array carries no rate, so it is ASSUMED to be at
+                ``self.sample_rate`` (out_sample_rate); feeding an array at any
+                other rate (e.g. ``load_audio``'s 24kHz default) clones a
+                pitch/speed-shifted ("chipmunk") voice.
             padding_mode: "right" or "left".
             trim_silence_vad: whether to apply VAD-based silence trimming.
 
@@ -227,8 +232,9 @@ class Model(nn.Module):
                     num_samples = int(len(audio) * self._encode_sample_rate / sr)
                     audio = scipy.signal.resample(audio, num_samples)
         else:
-            # mx.array or numpy array — assume loaded at model.sample_rate,
-            # resample to encoder rate if needed
+            # mx.array or numpy array — no rate is carried, so assume the caller
+            # loaded it at self.sample_rate (see docstring), then resample to the
+            # encoder rate. Pass a path instead if the array is at another rate.
             audio = np.array(audio_input).flatten()
             if self.sample_rate != self._encode_sample_rate:
                 import scipy.signal

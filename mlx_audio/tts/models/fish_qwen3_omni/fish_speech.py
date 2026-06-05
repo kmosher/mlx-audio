@@ -499,7 +499,7 @@ class Model(nn.Module):
         return conversation
 
     def _prepare_reference_prompt(
-        self, ref_audio: Optional[mx.array], ref_text: Optional[str]
+        self, ref_audio: Union[str, mx.array, None], ref_text: Optional[str]
     ) -> tuple[list[str], list[mx.array]]:
         prompt_tokens = []
         prompt_texts = []
@@ -507,7 +507,7 @@ class Model(nn.Module):
             if self.codec is None:
                 raise ValueError("Codec not loaded. Call post_load_hook first.")
 
-            audio = ref_audio
+            audio = self._load_reference_audio(ref_audio)
             if audio.ndim == 1:
                 audio = audio[None, None, :]
             elif audio.ndim == 2:
@@ -520,6 +520,31 @@ class Model(nn.Module):
             prompt_texts.append(ref_text or "")
 
         return prompt_texts, prompt_tokens
+
+    def _load_reference_audio(self, ref_audio: Union[str, mx.array]) -> mx.array:
+        """Resolve a reference clip to an mx.array at the codec's sample rate.
+
+        The codec does NOT resample, so a reference at any other rate clones a
+        pitch/speed-shifted ("chipmunk") voice. Passing a file path is the safe
+        interface — the true rate is read from the file and resampled here. Raw
+        arrays carry no rate, so they are assumed to already be at
+        ``self.sample_rate`` (the documented contract).
+        """
+        if isinstance(ref_audio, str):
+            import soundfile as sf
+
+            samples, sr = sf.read(ref_audio, dtype="float32")
+            if samples.ndim > 1:
+                samples = samples.mean(axis=1)
+            if sr != self.sample_rate:
+                import scipy.signal
+
+                num_samples = int(len(samples) * self.sample_rate / sr)
+                samples = scipy.signal.resample(samples, num_samples)
+            return mx.array(samples)
+        if isinstance(ref_audio, mx.array):
+            return ref_audio
+        return mx.array(ref_audio)  # numpy/list — assumed at self.sample_rate
 
     def _split_generation_text(self, text: str, chunk_length: int) -> list[str]:
         turns = split_text_by_speaker(text)
